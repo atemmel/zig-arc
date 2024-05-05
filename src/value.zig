@@ -23,15 +23,23 @@ pub const Value = union(enum) {
         switch (value) {
             .table => |t| {
                 // if refcount reaches 0, deinit keys/values
+                if (t.isFinal()) {
+                    const my_table = value.asTable();
+                    defer my_table.deinit();
+                    var it = my_table.iterator();
+                    while (it.next()) |entry| {
+                        entry.value_ptr.*.deinit();
+                    }
+                }
                 t.deinit();
             },
             .list => |l| {
                 // if refcount reaches 0, deinit values
                 if (l.isFinal()) {
+                    defer l.inner.data.deinit();
                     for (l.inner.data.items) |item| {
                         item.deinit();
                     }
-                    l.inner.data.deinit();
                 }
                 l.deinit();
             },
@@ -66,6 +74,12 @@ pub fn list(ally: Allocator) !Value {
     };
 }
 
+pub fn table(ally: Allocator) !Value {
+    return Value{
+        .table = try Rc(Table).init(Table.init(ally), ally),
+    };
+}
+
 pub fn string(str: []const u8, ally: Allocator) !Value {
     return Value{
         .string = try Rc(String).init(String{
@@ -76,8 +90,9 @@ pub fn string(str: []const u8, ally: Allocator) !Value {
 }
 
 const expectEqualStrings = std.testing.expectEqualStrings;
+const expect = std.testing.expect;
 
-test "rc gc test" {
+test "rc gc list test" {
     const ally = std.testing.allocator;
 
     var l = try list(ally);
@@ -91,4 +106,22 @@ test "rc gc test" {
 
     const str1 = l.asList().items[1].asString();
     try expectEqualStrings("hello", str1);
+}
+
+test "rc gc table test" {
+    const ally = std.testing.allocator;
+
+    var l = try table(ally);
+    defer l.deinit();
+
+    try l.asTable().put("", try string("", ally));
+    try l.asTable().put("greeting", try string("hello", ally));
+
+    const str0 = l.asTable().get("");
+    try expect(str0 != null);
+    try expectEqualStrings("", str0.?.asString());
+
+    const str1 = l.asTable().get("greeting");
+    try expect(str1 != null);
+    try expectEqualStrings("hello", str1.?.asString());
 }
