@@ -19,6 +19,20 @@ pub const Value = union(enum) {
         return value.string.inner.data.bytes;
     }
 
+    pub fn ref(value: Value) Value {
+        return switch (value) {
+            .table => |t| .{
+                .table = t.ref(),
+            },
+            .list => |l| .{
+                .list = l.ref(),
+            },
+            .string => |s| .{
+                .string = s.ref(),
+            },
+        };
+    }
+
     pub fn deinit(value: Value) void {
         switch (value) {
             .table => |t| {
@@ -34,12 +48,12 @@ pub const Value = union(enum) {
                 t.deinit();
             },
             .list => |l| {
+                for (l.inner.data.items) |item| {
+                    item.deinit();
+                }
                 // if refcount reaches 0, deinit values
                 if (l.isFinal()) {
                     defer l.inner.data.deinit();
-                    for (l.inner.data.items) |item| {
-                        item.deinit();
-                    }
                 }
                 l.deinit();
             },
@@ -48,6 +62,32 @@ pub const Value = union(enum) {
                     s.inner.data.deinit();
                 }
                 s.deinit();
+            },
+        }
+    }
+
+    pub fn usages(value: Value) void {
+        usagesImpl(value, 0);
+    }
+
+    fn usagesImpl(value: Value, depth: u64) void {
+        const print = std.debug.print;
+        for (0..depth) |_| {
+            print("  ", .{});
+        }
+        switch (value) {
+            .table => |t| {
+                _ = t;
+                unreachable;
+            },
+            .list => |l| {
+                print("list: {}\n", .{l.inner.usages});
+                for (l.inner.data.items) |item| {
+                    item.usagesImpl(depth + 1);
+                }
+            },
+            .string => |s| {
+                print("string: {}\n", .{s.inner.usages});
             },
         }
     }
@@ -124,4 +164,19 @@ test "rc gc table test" {
     const str1 = l.asTable().get("greeting");
     try expect(str1 != null);
     try expectEqualStrings("hello", str1.?.asString());
+}
+
+test "rc gc nested list test" {
+    const ally = std.testing.allocator;
+
+    var l = try list(ally);
+    defer l.deinit();
+
+    var l0 = try list(ally);
+    defer l0.deinit();
+
+    try l.asList().append(l0.ref());
+    try l.asList().append(l0.ref());
+
+    l.usages();
 }
