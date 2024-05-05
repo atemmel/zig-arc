@@ -1,47 +1,6 @@
 const std = @import("std");
-
-pub fn Rc(comptime T: type) type {
-    return struct {
-        const Self = @This();
-
-        const Inner = struct {
-            data: T,
-            usages: u64,
-        };
-
-        inner: *Inner,
-        ally: std.mem.Allocator,
-
-        pub fn init(value: T, ally: std.mem.Allocator) !Self {
-            const inner = try ally.create(Inner);
-            inner.* = Inner{
-                .data = value,
-                .usages = 1,
-            };
-            return Self{
-                .inner = inner,
-                .ally = ally,
-            };
-        }
-
-        pub fn deinit(self: Self) void {
-            std.debug.assert(self.inner.usages > 0);
-            self.inner.usages -= 1;
-            if (self.inner.usages == 0) {
-                self.ally.destroy(self.inner);
-            }
-        }
-
-        pub fn isFinal(self: Self) bool {
-            return self.inner.usages == 1;
-        }
-
-        pub fn ref(self: Self) Self {
-            self.inner.usages += 1;
-            return self;
-        }
-    };
-}
+const Rc = @import("rc.zig").Rc;
+const Allocator = std.mem.Allocator;
 
 pub const Value = union(enum) {
     table: Rc(Table),
@@ -54,6 +13,10 @@ pub const Value = union(enum) {
 
     pub fn asTable(value: Value) *Table {
         return &value.table.inner.data;
+    }
+
+    pub fn asString(value: Value) []const u8 {
+        return value.string.inner.data.bytes;
     }
 
     pub fn deinit(value: Value) void {
@@ -83,7 +46,7 @@ pub const Value = union(enum) {
 };
 
 pub const String = struct {
-    ally: std.mem.Allocator,
+    ally: Allocator,
     bytes: []const u8,
 
     pub fn deinit(self: *String) void {
@@ -97,13 +60,13 @@ pub const Table = std.StringHashMap(Value);
 
 pub const List = std.ArrayList(Value);
 
-pub fn list(ally: std.mem.Allocator) !Value {
+pub fn list(ally: Allocator) !Value {
     return Value{
         .list = try Rc(List).init(List.init(ally), ally),
     };
 }
 
-pub fn string(str: []const u8, ally: std.mem.Allocator) !Value {
+pub fn string(str: []const u8, ally: Allocator) !Value {
     return Value{
         .string = try Rc(String).init(String{
             .ally = ally,
@@ -112,7 +75,7 @@ pub fn string(str: []const u8, ally: std.mem.Allocator) !Value {
     };
 }
 
-pub fn main() !void {}
+const expectEqualStrings = std.testing.expectEqualStrings;
 
 test "rc gc test" {
     const ally = std.testing.allocator;
@@ -122,4 +85,10 @@ test "rc gc test" {
 
     try l.asList().append(try string("", ally));
     try l.asList().append(try string("hello", ally));
+
+    const str0 = l.asList().items[0].asString();
+    try expectEqualStrings("", str0);
+
+    const str1 = l.asList().items[1].asString();
+    try expectEqualStrings("hello", str1);
 }
