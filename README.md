@@ -1,1 +1,1 @@
-# zig-arc
+# zig-rc
